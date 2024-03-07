@@ -10,6 +10,9 @@ enum COLORS {
 	WHITE_BLUE
 };
 
+struct Menuopt;
+typedef int (*functype)(WINDOW*, struct Menuopt*, void**);
+
 struct Task {
 	char* name;
 	int status;
@@ -18,6 +21,27 @@ struct List {
 	char* name;
 	vector tasks;
 };
+struct Keybinding {
+	char* key;
+	functype* func;
+	int size;
+};
+struct Callback {
+	functype* func;
+	int size;
+};
+struct Menuopt {
+	char** optname;
+	struct Callback callback;
+	struct Keybinding keybinding;
+	int cursor[2];
+};
+
+struct Menuopt menuopt_init() {
+	struct Menuopt m = {NULL, {NULL, 0}, {NULL, NULL, 0}, 0};
+	return m;
+}
+
 
 vector load_data_file() {
 	struct stat st;
@@ -122,13 +146,82 @@ void draw_tasks(WINDOW* task_win, struct List* L) {
 	wrefresh(stdscr);
 	wrefresh(task_win);
 }
-void menu() {}
+int menu(WINDOW* win, struct Menuopt* menuopt, void** data) {
+	int y, x; getmaxyx(win, y, x);
+	wattron(win, COLOR_PAIR(WHITE_BLACK));
+	mvwaddstr(win, menuopt->cursor[0], 4, menuopt->optname[menuopt->cursor[1]]);
+	wattroff(win, COLOR_PAIR(WHITE_BLACK));
+	for (;;) {
+		int ch = wgetch(win);
+		switch (ch) {
+			case 27:
+				return 0;
+			case KEY_UP:
+				if (!menuopt->cursor[1]) continue;
+				mvwaddstr(win, menuopt->cursor[0], 4, menuopt->optname[menuopt->cursor[1]]);
+				menuopt->cursor[0]--; menuopt->cursor[1]--;
+				wattron(win, COLOR_PAIR(WHITE_BLACK));
+				mvwaddstr(win, menuopt->cursor[0], 4, menuopt->optname[menuopt->cursor[1]]);
+				wattroff(win, COLOR_PAIR(WHITE_BLACK));
+				break;
+			case KEY_DOWN:
+				if (menuopt->cursor[1] == menuopt->callback.size-1) continue;
+				mvwaddstr(win, menuopt->cursor[0], 4, menuopt->optname[menuopt->cursor[1]]);
+				menuopt->cursor[0]++; menuopt->cursor[1]++;
+				wattron(win, COLOR_PAIR(WHITE_BLACK));
+				mvwaddstr(win, menuopt->cursor[0], 4, menuopt->optname[menuopt->cursor[1]]);
+				wattroff(win, COLOR_PAIR(WHITE_BLACK));
+				break;
+			case 10:
+				data[2] = vector_get_generic_at((vector*)data[1], menuopt->cursor[1]);
+				return menuopt->callback.func[menuopt->cursor[1]](win, menuopt, data);
+				break;
+			default:
+				break;
+		}
+	}
+}
+
+char** get_listnames(vector* Lists) {
+	char** optname = malloc(sizeof(char*)*Lists->memsize);
+	for (int i=0; i<Lists->memsize; i++) {
+		struct List* l = vector_get_generic_at(Lists, i);
+		optname[i] = l->name;
+	}
+	return optname;
+}
+
+char** get_tasknames(struct List* L) {
+	char** optname = malloc(sizeof(char*)*L->tasks.memsize);
+	for (int i=0; i<L->tasks.memsize; i++) {
+		struct List* l = vector_get_generic_at(&L->tasks, i);
+		optname[i] = l->name;
+	}
+	return optname;
+}
+
+int add_task(WINDOW* win, struct Menuopt* menuopt, void** data) {
+	return 1;
+}
+
+int open_tasklist(WINDOW* win, struct Menuopt* menuopt, void** data) {
+	WINDOW* task_win = data[0];
+	vector* Lists = data[1];
+	struct List* L = data[2];
+
+	draw_tasks(task_win, L);
+	char** optname = get_tasknames(L);
+	struct Menuopt _menuopt = {optname, {0, L->tasks.memsize}, {0, 0, 0}, {0, 0}};
+	menu(task_win, &_menuopt, 0);
+
+	return 1;
+}
 
 int main() {
 	WINDOW* stdscr = initscr();
 	start_color(); use_default_colors();
 	keypad(stdscr, 1); set_escdelay(200);
-	curs_set(0);
+	curs_set(0); noecho();
 
 	init_pair(WHITE_BLACK, 0, 15);
 	init_pair(WHITE_BLUE, 15, 20);
@@ -139,13 +232,17 @@ int main() {
 
 	WINDOW* upper_bar = draw_upper_bar(stdscr, y, x);
 	WINDOW* tasklist_win = draw_tasklists(stdscr, y, x, &Lists);
-	WINDOW* task_win = newwin(0, 0, 0, 0);
+	WINDOW* task_win = newwin(y-3, x, 2, 0);
 	WINDOW* lower_bar = draw_lower_bar(stdscr, y, x);
 	keypad(task_win, 1); scrollok(task_win, 1);
 	wrefresh(stdscr);
 
-
-	wgetch(stdscr);
+	char** optname = get_listnames(&Lists);
+	functype* funcs = malloc(sizeof(functype)*Lists.memsize);
+	for (int i=0; i<Lists.memsize; i++) funcs[i] = open_tasklist;
+	struct Menuopt menuopt = {optname, {funcs, Lists.memsize}, {0,0,0}, {0, 0}};
+	void* data[3] = {task_win, &Lists};
+	menu(tasklist_win, &menuopt, data);
 
 	endwin();
 }
