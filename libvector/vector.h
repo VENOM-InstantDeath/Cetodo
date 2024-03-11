@@ -33,6 +33,8 @@ void* _realloc2(void* ptr, size_t size);
 
 void vector_raise(char* function, vector_exception exception);
 
+void string_grow(string* S, size_t size);
+void string_shrink(string* S, size_t size);
 string string_init(char* str);
 char string_get_at(string* S, int n);
 void string_asign_at(string* S, int n, char ch);
@@ -41,6 +43,8 @@ int string_count(string* S, char ch);
 void string_append(string* S, char* str);
 void string_append_int(string* S, int num);
 void string_append_char(string* S, char ch);
+void string_shift(string* S, int start, int end, int steps);
+void string_shift_left(string* S, int start, int end, int steps);
 int string_find(string* S, char ch);
 int string_rfind(string* S, char ch);
 void string_append_fmt(string* S, char* fmt, ...);
