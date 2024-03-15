@@ -1,9 +1,11 @@
 #include <ncurses.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <json.h>
 #include <sys/stat.h>
 #include "libvector/vector.h"
+#include "libncread/ncread.h"
 
 enum COLORS {
 	WHITE_BLACK=1,
@@ -27,7 +29,7 @@ struct Keybinding {
 	int size;
 };
 struct Callback {
-	functype* func;
+	vector func;
 	int size;
 };
 struct Menuopt {
@@ -81,7 +83,9 @@ vector load_data_file() {
 			}
 			vector_append_generic(&Lists, list);
 		}
+		free(buffer);
 	}
+	string_free(&path); string_free(&s_path_data);
 	return Lists;
 }
 void load_trusted_file() {
@@ -101,6 +105,7 @@ void load_trusted_file() {
 	if (stat(path_trusted, &st) == -1) {
 	} else {
 	}
+	string_free(&path); string_free(&s_path_trusted);
 }
 
 WINDOW* draw_upper_bar(WINDOW* stdscr, int y, int x) {
@@ -130,6 +135,7 @@ WINDOW* draw_tasklists(WINDOW* stdscr, int y, int x, vector* Lists) {
 		string num = string_init(NULL); string_append_int(&num, L->tasks.memsize);
 		mvwaddstr(tasklist_win, i, 0, string_get_c_str(&num));
 		mvwaddstr(tasklist_win, i, 4, L->name);
+		string_free(&num);
 	}
 	wrefresh(stdscr);
 	wrefresh(tasklist_win);
@@ -142,6 +148,7 @@ void draw_tasks(WINDOW* task_win, struct List* L) {
 		struct Task* T = vector_get_generic_at(&L->tasks, i);
 		string line = string_init(NULL); string_append_fmt(&line, "[%c] %s", T->status ? 'x' : ' ', T->name);
 		mvwaddstr(task_win, i, 0, string_get_c_str(&line));
+		string_free(&line);
 	}
 	wrefresh(stdscr);
 	wrefresh(task_win);
@@ -173,10 +180,14 @@ int menu(WINDOW* win, struct Menuopt* menuopt, void** data) {
 				wattroff(win, COLOR_PAIR(WHITE_BLACK));
 				break;
 			case 10:
-				return menuopt->callback.func[menuopt->cursor[1]](win, menuopt, data);
+				return ((functype)vector_get_generic_at(&menuopt->callback.func, menuopt->cursor[1]))(win, menuopt, data);
 				break;
 			default:
-				break;
+				for (int i=0; i<menuopt->keybinding.size; i++) {
+					if (ch == menuopt->keybinding.key[i]) {
+						return menuopt->keybinding.func[i](win, menuopt, data);
+					}
+				}
 		}
 	}
 }
@@ -210,23 +221,55 @@ int task_check(WINDOW* win, struct Menuopt* menuopt, void** data) {
 }
 
 char* ask_task_name(WINDOW* task_win) {
-	WINDOW* win = newwin(0, 0, 0, 0); // CHANGE THIS
-	/*draw win*/
-	char* name; //= ncread();
+	int y, x; getmaxyx(stdscr, y, x);
+	WINDOW* win = newwin(4, 30, y/2-2, x/2-12); 
+	keypad(win, 1);
+	getmaxyx(win, y, x);
+	mvwaddstr(win, 0, x/2-6, "Add Task");
+	mvwaddstr(win, 2, 2, "Nombre:");
+	char* name=NULL;
+	for (;;) {
+		if (!Sread(win, 2, 10, 15, 20, &name) || !name || !strlen(name)) continue;
+		break;
+	}
 	delwin(win);
 	wrefresh(task_win);
 	return name;
+}
+
+struct Task* new_task(char* task_name) {
+	struct Task* T = malloc(sizeof(struct Task));
+	T->name=task_name; T->status=0;
 }
 
 int add_task(WINDOW* win, struct Menuopt* menuopt, void** data) {
 	WINDOW* task_win = data[0];
 	vector* Tasks = data[1];
 	char* task_name = ask_task_name(task_win);
-	struct Task T = {task_name, 0}; // TO HEAP
-	vector_append_generic(Tasks, &T);
+	struct Task* T = new_task(task_name); vector_append_generic(Tasks, T);
 	vector_append_string(&menuopt->optname, task_name);
+
+	int y,x; getmaxyx(task_win, y,x);
+	if (menuopt->callback.size<y) {
+		string line = string_init("[ ] ");string_append(&line, task_name);
+		mvwaddstr(task_win, menuopt->callback.size, 0, string_get_c_str(&line));
+		string_free(&line);
+	}
+	menuopt->callback.size++;
+	vector_append_generic(&menuopt->callback.func, task_check);
 	return 1;
 }
+
+int delete_task(WINDOW* win, struct Menuopt* menuopt, void** data) {
+	WINDOW* task_win = data[0];
+	vector* Tasks = data[1];
+	if (!menuopt->callback.size) return 1;
+	vector_remove(Tasks, menuopt->cursor[1]);
+	vector_remove(&menuopt->optname, menuopt->cursor[1]);
+	vector_remove(&menuopt->callback.func, menuopt->cursor[1]);
+}
+
+int go_back(WINDOW* win, struct Menuopt* menuopt, void** data) {return 0;}
 
 int open_tasklist(WINDOW* win, struct Menuopt* menuopt, void** data) {
 	WINDOW* task_win = data[0];
@@ -235,14 +278,17 @@ int open_tasklist(WINDOW* win, struct Menuopt* menuopt, void** data) {
 
 	draw_tasks(task_win, L);
 	vector optname = get_tasknames(L);
-	functype* funcs = malloc(sizeof(functype)*L->tasks.memsize);
-	for (int i=0; i<L->tasks.memsize; i++) funcs[i] = task_check;
-	struct Menuopt _menuopt = {optname, {funcs, L->tasks.memsize}, {0, 0, 0}, {0, 0}};
+	vector funcs = vector_init(VGEN);
+	for (int i=0; i<L->tasks.memsize; i++) vector_asign_generic_at(&funcs, i, task_check);
+	char keys[] = {'a', 's'};
+	functype kbinds[] = {add_task, go_back};
+	struct Menuopt _menuopt = {optname, {funcs, L->tasks.memsize}, {keys, kbinds, 2}, {0, 0}};
 	void* _data[2] = {task_win, &L->tasks};
 	for (;;) {
 		if (menu(task_win, &_menuopt, _data)) {
 			touchwin(task_win);wrefresh(task_win);
 		} else {
+		vector_free(&_menuopt.callback.func);
 			return 1;
 		}
 	}
@@ -252,7 +298,7 @@ int main() {
 	WINDOW* stdscr = initscr();
 	start_color(); use_default_colors();
 	keypad(stdscr, 1); set_escdelay(200);
-	curs_set(0); noecho();
+	curs_set(0); noecho(); cbreak();
 
 	init_pair(WHITE_BLACK, 0, 15);
 	init_pair(WHITE_BLUE, 15, 20);
@@ -269,8 +315,8 @@ int main() {
 	wrefresh(stdscr);
 
 	vector optname = get_listnames(&Lists);
-	functype* funcs = malloc(sizeof(functype)*Lists.memsize);
-	for (int i=0; i<Lists.memsize; i++) funcs[i] = open_tasklist;
+	vector funcs = vector_init(VGEN);
+	for (int i=0; i<Lists.memsize; i++) vector_asign_generic_at(&funcs, i, open_tasklist);
 	struct Menuopt menuopt = {optname, {funcs, Lists.memsize}, {0,0,0}, {0, 0}};
 	void* data[2] = {task_win, &Lists};
 	for (;;) {
