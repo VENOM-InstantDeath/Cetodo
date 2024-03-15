@@ -1,164 +1,94 @@
-#include <stdio.h>
 #include <ncurses.h>
-#include <stdlib.h>
-#include <string.h>
 #include "ncread.h"
-#include "vector.h"
+#include "../libvector/vector.h"
 
-struct string vslice(struct string v,int a, int b) {
-	struct string s;
-	string_init(&s);
-        for (int i=a;i<b;i++){
-		if (i >= v.size) break;
-                string_addch(&s, v.str[i]);
-        }
-        return s;
+void string_append_char_at(string* S, int index, char ch) {
+	size_t end = S->memsize;
+	string_grow(S, 1);
+	index = index < 0 ? S->memsize+index : index;
+	if (S->memsize > 1) string_shift(S, index, end, 1);
+	string_asign_at(S, index, ch);
 }
 
-char* listostr(struct string l) {
-	char* s;
-	if (!l.size) s=calloc(1,1);
-	else s = malloc(l.size);
-	for (int i=0;i<l.size;i++) {
-		s[i] = l.str[i];
-	}
-	s[l.size] = 0;
-	return s;
+void string_pop_at(string* S, int index) {
+	index = index < 0 ? S->memsize+index : index;
+	if (S->memsize > 1) string_shift_left(S, index+1, S->memsize, 1);
+	string_shrink(S, 1);
 }
 
-void clrbox(WINDOW* win, int y, int x, int minlim, int vislim) {
-	for (int i=x;i<x+(vislim-minlim)+1;i++) {
-		mvwaddch(win,y,i,32);
-	}
+void clear_region(WINDOW* win, int y, int x, int n) {
+	for (;x<n; x++) {mvwaddch(win, y, x, ' ');}
 }
 
-void right(WINDOW* win, int y, int x, int* p, int* sp, int* minlim, int* vislim, struct string String, int mode) {
-	if (*sp == *vislim) {
-		(*vislim)++;(*minlim)++;
-		clrbox(win,y,x,*minlim,*vislim);
-		int acum1=0;
-		struct string vsliced = vslice(String,*minlim,(*vislim)+1);
-		for (int i=0;i<vsliced.size;i++) {
-			if (mode) mvwaddch(win,y,x+acum1,'*');
-			else mvwaddch(win,y,x+acum1,vsliced.str[i]);
-			acum1++;
-		}
-		(*sp)++;return;
-	}
-	(*p)++;
-	(*sp)++;
-
-}
-void left(WINDOW* win, int y, int x, int* p, int* sp, int* minlim, int* vislim, struct string String, int mode) {
-	if (!(*p) && *sp) {
-		(*vislim)--;(*minlim)--;
-		clrbox(win,y,x,*minlim,*vislim);
-		int acum1 = 0;
-		struct string vsliced = vslice(String,*minlim,(*vislim)+1);
-		for (int i=0;i<vsliced.size;i++) {
-			if (mode) mvwaddch(win,y,x+acum1,'*');
-			else mvwaddch(win,y,x+acum1,vsliced.str[i]);
-			acum1++;
-		}
-		(*sp)--;return;
-	}
-	(*p)--;
-	(*sp)--;
-}
-void _erase(WINDOW* win, int y, int x, int* p, int* sp, int* minlim, int* vislim, struct string* String, int mode) {
-	string_popat(String, (*sp)-1);
-	clrbox(win,y,x,*minlim,*vislim);
-	if (!p && sp) {(*vislim)--;(*minlim)--;}
-	int acum1 = 0;
-	struct string vsliced = vslice(*String,*minlim,(*vislim)+1);
-	for (int i=0;i<vsliced.size;i++) {
-		if (mode) mvwaddch(win,y,x+acum1,'*');
-		else mvwaddch(win,y,x+acum1,vsliced.str[i]);
-		acum1++;
-	}
-	if (!(!(*p) && *sp)) (*p)--;
-	(*sp)--;
-}
-void end(WINDOW* win, int y, int x, int* p, int* sp, int* minlim, int* vislim, int ovislim, struct string String, int mode) {
-	int cpyvslm = ovislim;
-	if (String.size > ovislim) {*vislim=String.size;}
-	else if (String.size < ovislim) {cpyvslm=String.size;}
-	*minlim = String.size-cpyvslm;
-	*p = cpyvslm;
-	*sp = String.size;
-	clrbox(win, y, x, *minlim, *vislim);
-	int acum1 = 0;
-	struct string vsliced = vslice(String,*minlim,(*vislim)+1);
-	for (int i=0;i<vsliced.size;i++) {
-		if (mode) mvwaddch(win,y,x+acum1,'*');
-		else mvwaddch(win,y,x+acum1,vsliced.str[i]);
-		acum1++;
-	}
-	return;
-}
-
-int ampsread(WINDOW* win, char** ptr, int y, int x, int vislim, int chlim, int mode, int curs_off) {
+int Sread(WINDOW* win, int y, int x, int visual_limit, int char_limit, char** buff) {
+	string S = string_init(*buff);
 	curs_set(1);
-	struct string String;
-	struct string vsliced;
-	string_init(&String); string_init(&vsliced);
-	int p = 0;
-	int sp = 0;
-	int minlim = 0;
-	int ovislim = vislim;
-	noecho();
-	clrbox(win,y,x,minlim,vislim);
-	if (*ptr && strlen(*ptr)) {
-		string_add(&String, *ptr);
-		end(win, y, x, &p, &sp, &minlim, &vislim, ovislim, String, mode);
+	int p[2]={0};
+	int scrolln=0;
+	for (;;) {
+		int ch = mvwgetch(win, y, x+p[0]);
+		switch (ch) {
+			case 27:
+				curs_set(0);
+				return 0;
+			case KEY_LEFT:
+				if (!p[1]) continue;
+				if (!p[0]) {
+					clear_region(win, y, x, x+visual_limit);
+					scrolln--;
+					mvwaddnstr(win, y, x, S.c_str+scrolln, visual_limit);
+					p[1]--;
+					continue;
+				}
+				p[0]--; p[1]--;
+				break;
+			case KEY_RIGHT:
+				if (p[1] == S.memsize || p[1]==char_limit) continue;
+				if (p[0] == visual_limit) {
+					clear_region(win, y, x, x+visual_limit);
+					scrolln++;
+					mvwaddnstr(win, y, x, S.c_str+scrolln, visual_limit);
+					p[1]++;
+					continue;
+				}
+				p[0]++; p[1]++;
+				break;
+			case 127:
+			case KEY_BACKSPACE:
+				if (!p[1]) continue;	
+				string_pop_at(&S, p[1]-1);
+				if (!p[0]) {
+					clear_region(win, y, x, x+visual_limit);
+					scrolln--;
+					mvwaddnstr(win, y, x, S.c_str+scrolln, visual_limit);
+					p[1]--;
+				} else {
+					p[0]--; p[1]--;	
+					clear_region(win, y, x+p[0], x+visual_limit);
+					mvwaddnstr(win, y, x+p[0], S.c_str+p[1], S.memsize>visual_limit ? visual_limit+scrolln-p[1] : S.memsize-p[1]);
+				}
+				break;
+			case 4:
+			case 10:
+				curs_set(0);
+				*buff = string_get_c_str(&S);
+				return 1;
+			default:
+				if (S.memsize == char_limit) continue; // IF p[0] IS VISUAL_LIMIT SCROLL HORIZONTALLY
+				if (!((ch >= ' ' && ch <= '~') || (ch >= 225 && ch <= 250))) continue;
+				string_append_char_at(&S, p[1],ch);
+				if (p[0] == visual_limit) {
+					clear_region(win, y, x, x+visual_limit);
+					scrolln++;
+					mvwaddnstr(win, y, x, S.c_str+scrolln, visual_limit);
+					p[1]++;
+					continue;
+				} else {
+					clear_region(win, y, x+p[0], x+visual_limit);
+					mvwaddnstr(win, y, x+p[0], S.c_str+p[1], S.memsize>visual_limit ? visual_limit+scrolln-p[1] : S.memsize-p[1]);
+					p[0]++; p[1]++;
+				}
+		}
 	}
-	wrefresh(win);
-
-	while (1) {
-		int ch = mvwgetch(win,y,x+p);
-		if (ch == 127) ch = KEY_BACKSPACE;
-		else if (ch == 8) ch = KEY_BACKSPACE;
-		if (ch == 4) {}
-		else if (ch == 27) {if (curs_off) curs_set(0); return 1;}
-		else if (ch == '\n') {*ptr = String.str;if (curs_off) curs_set(0);return 0;}
-		else if (ch == KEY_BACKSPACE) {
-			if (!sp) continue;
-			_erase(win, y, x, &p, &sp, &minlim, &vislim, &String, mode);
-			continue;
-		}
-		else if (ch == KEY_RIGHT) {
-			if (sp == String.size) continue;
-			right(win, y, x, &p, &sp, &minlim, &vislim, String, mode);
-			continue;
-		}
-		else if (ch == KEY_LEFT) {
-			if (!sp) continue;
-			left(win, y, x, &p, &sp, &minlim, &vislim, String, mode);
-			continue;
-		}
-		if (String.size == chlim) continue;
-		if (ch < 32 || ch > 250) continue;
-		string_addchat(&String, ch, sp);
-		clrbox(win,y,x,minlim,vislim);
-		if (sp == vislim) {
-			vislim++;minlim++;
-			int acum1=0;
-			vsliced = vslice(String,minlim,vislim+1);
-			for (int i=0;i<vsliced.size;i++) {
-				if (mode) mvwaddch(win,y,x+acum1,'*');
-				else mvwaddch(win,y,x+acum1,vsliced.str[i]);
-				acum1++;
-			}
-			sp++;continue;
-		}
-		int acum1=0;
-		vsliced = vslice(String,minlim,vislim+1);
-		for (int i=0;i<vsliced.size;i++) {
-			if (mode) mvwaddch(win,y,x+acum1,'*');
-			else mvwaddch(win,y,x+acum1,vsliced.str[i]);
-			acum1++;
-		}
-		sp++;
-		p++;
-	}
+	return 1;
 }

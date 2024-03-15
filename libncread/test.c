@@ -1,5 +1,5 @@
 #include <ncurses.h>
-#include "nc.h"
+#include "ncread.h"
 
 int main() {
 	WINDOW* stdscr = initscr();

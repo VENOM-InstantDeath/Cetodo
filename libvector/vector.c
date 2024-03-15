@@ -3,9 +3,10 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <math.h>
+#include <ctype.h>
 #include "vector.h"
 
-#define VERSION "1.1.2"
+#define VERSION "1.3.0"
 
 char* _error_messages[] = {
 	"NULL_STR: Se esperaba un c-string pero se obtuvo un puntero nulo",
@@ -13,6 +14,7 @@ char* _error_messages[] = {
 	"NULL_OBJ: Se esperaba un objeto vector pero se obtuvo un puntero nulo",
 	"OUT_OF_BOUNDS: La posición solicitada está fuera de los límites del vector",
 	"VECTYPE_ERROR: El tipo del vector indicado no soporta esa operación",
+	"STR_NOT_NUM: El string provisto no es un string numérico o no es válido"
 };
 
 void* _realloc(void* ptr, size_t size) {
@@ -211,6 +213,64 @@ void string_append_fmt(string* S, char* fmt, ...) {
 	va_end(argv);
 }
 
+int string_is_int(string* S) {
+	for (int i=0; i<S->memsize; i++) {
+		char ch = string_get_at(S, i);
+		if (ch < '0' || ch > '9') return 0;
+	}
+	return 1;
+}
+
+int string_is_num(string* S) {
+	char c=0;
+	for (int i=0; i<S->memsize; i++) {
+		char ch = string_get_at(S, i);
+		if (ch == '.') {
+			if (!i || i==S->memsize-1 || c) return 0;
+			c++;
+			continue;
+		}
+		if (ch < '0' || ch > '9') return 0;
+	}
+	return 1+c;
+}
+
+void string_to_lower(string* S) {
+	for (int i=0; i<S->memsize; i++) {
+		string_asign_at(S, i, tolower(string_get_at(S, i)));
+	}
+}
+
+void string_to_upper(string* S) {
+	for (int i=0; i<S->memsize; i++) {
+		string_asign_at(S, i, toupper(string_get_at(S, i)));
+	}
+}
+
+int string_to_int(string* S) {
+	if (!string_is_int(S)) vector_raise("string_to_int", STR_NOT_NUM);
+	int num=0;
+	for (int i=0; i<S->memsize; i++) {
+		num*=10; num += string_get_at(S, i)-'0';
+	}
+	return num;
+}
+
+double string_to_double(string* S) {
+	if (!string_is_num(S)) vector_raise("string_to_double", STR_NOT_NUM);
+	double num=0;
+	char n = 0;
+	for (int i=0; i<S->memsize; i++) {
+		char ch = string_get_at(S, i);
+		if (ch == '.') {n++;continue;}
+		if (n) n++;
+		num*=10; num += ch-'0';
+	}
+	if (n) n-=2;
+	num/=10*pow(10, n);
+	return num;
+}
+
 void string_free(string* S) {
 	free(S->c_str); S->c_str=NULL;
 	S->memsize=0;
@@ -403,6 +463,18 @@ void vector_remove(vector* V, int index) {
 	index = index < 0 ? V->memsize+index : index;
 	vector_shift_left(V, index+1, V->memsize, 1);
 	vector_shrink(V, 1);
+}
+
+void vector_free(vector* V) {
+	switch (V->type) {
+		case VGEN:
+			free(V->T.gen);V->T.gen=NULL;break;
+		case VINT:
+			free(V->T.num);V->T.num=NULL;break;
+		case VSTRLIST:
+			free(V->T.strls);V->T.strls=NULL;break;
+	}
+	V->memsize=0;
 }
 
 void vector_insert_int(vector* V, int arg) {}

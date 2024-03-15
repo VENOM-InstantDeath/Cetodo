@@ -6,7 +6,8 @@ typedef enum {
 	NULL_SOBJ,
 	NULL_OBJ,
 	OUT_OF_BOUNDS,
-	VECTYPE_ERROR
+	VECTYPE_ERROR,
+	STR_NOT_NUM
 } vector_exception;
 typedef enum {
 	VINT,
@@ -114,6 +115,8 @@ switch(V->type) {\
 }
 
 void vector_remove(vector* V, int index);
+
+void vector_free(vector* V);
 
 void vector_insert_int(vector* V, int arg);
 void vector_insert_generic(vector* V, void* arg);
